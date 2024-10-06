@@ -1,0 +1,121 @@
+import re
+
+class PysexInterpreter:
+    def __init__(self):
+        self.variables = {}
+        self.functions = {}
+
+        # Define built-in functions
+        self.built_in_functions = {
+            "print": self.builtin_print
+        }
+
+    def trim_whitespace(self, string):
+        return string.strip()
+
+    def set_variable(self, name, value):
+        self.variables[name] = value
+
+    def get_variable(self, name):
+        if name in self.variables:
+            return self.variables[name]
+        raise ValueError(f"Variable '{name}' is not defined")
+
+    def define_function(self, name, params, body):
+        self.functions[name] = (params, body)
+
+    def call_function(self, name, args):
+        if name in self.functions:
+            params, body = self.functions[name]
+            if len(params) != len(args):
+                raise ValueError(f"Function '{name}' expects {len(params)} arguments, got {len(args)}")
+            local_vars = dict(zip(params, args))
+            return self.evaluate_expression(body, local_vars)
+        elif name in self.built_in_functions:
+            return self.built_in_functions[name](args)
+        raise ValueError(f"Function '{name}' is not defined")
+
+    def builtin_print(self, args):
+        print(" ".join(str(arg) for arg in args))
+
+    def evaluate_expression(self, expression, local_vars=None):
+        if local_vars is not None:
+            for var, value in local_vars.items():
+                expression = expression.replace(var, str(value))
+
+        for var, value in self.variables.items():
+            expression = expression.replace(var, str(value))
+
+        # Attempt to safely evaluate the expression
+        try:
+            # Remove semicolons if they exist
+            expression = expression.replace(';', '')
+
+            # Evaluate if it's a return statement
+            if expression.startswith("return "):
+                return self.evaluate_expression(expression[7:], local_vars)
+
+            # Evaluate numerical expressions
+            expression = expression.replace('+', ' + ').replace('-', ' - ').replace('*', ' * ').replace('/', ' / ')
+            tokens = expression.split()
+            total = 0
+            current_op = '+'
+
+            for token in tokens:
+                if token.isnumeric():
+                    number = int(token)
+                    if current_op == '+':
+                        total += number
+                    elif current_op == '-':
+                        total -= number
+                    elif current_op == '*':
+                        total *= number
+                    elif current_op == '/':
+                        total /= number
+                else:
+                    current_op = token
+
+            return total
+
+        except Exception as e:
+            raise ValueError(f"Error evaluating expression '{expression}': {e}")
+
+    def evaluate_statement(self, statement):
+        statement = self.trim_whitespace(statement)
+
+        if statement.startswith("let "):
+            var_name, value = statement[4:].split(" = ")
+            self.set_variable(var_name.strip(), self.evaluate_expression(value))
+        elif statement.startswith("func "):
+            func_def = re.match(r"func (\w+)\((.*?)\) {(.*?)}", statement, re.DOTALL)
+            if func_def:
+                name = func_def.group(1)
+                params = [param.strip() for param in func_def.group(2).split(",")]
+                body = func_def.group(3).strip()
+                self.define_function(name, params, body)
+        elif statement.startswith("print "):
+            expression = statement[6:]
+            # Evaluate the entire expression, not just the parts
+            result = self.evaluate_expression(expression)
+            self.call_function("print", [result])  # Pass the computed result to print
+        else:
+            func_call = re.match(r"(\w+)\((.*?)\)", statement)
+            if func_call:
+                name = func_call.group(1)
+                args = [arg.strip() for arg in func_call.group(2).split(",")]
+                arg_values = [self.evaluate_expression(arg) for arg in args]
+                self.call_function(name, arg_values)
+
+    def run_file(self, filename):
+        with open(filename, 'r') as file:
+            for line in file:
+                self.evaluate_statement(line.strip())
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) != 2:
+        print("Usage: python pysex_interpreter.pse <filename.pse>")
+        sys.exit(1)
+
+    interpreter = PysexInterpreter()
+    interpreter.run_file(sys.argv[1])
